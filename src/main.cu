@@ -189,9 +189,6 @@ __global__ void render_with_sample(Vec3* fb, int max_x, int max_y, int max_s, Ca
     col = color(r, background, world, &local_rand_state);
     
     randState[pixel_index] = local_rand_state;
-    col[0] = sqrt(col[0]);
-    col[1] = sqrt(col[1]);
-    col[2] = sqrt(col[2]);
     fb[pixel_index] = col;
 }
 
@@ -291,15 +288,18 @@ int main(int argc, char* argv[]) {
     uint8_t* imageHost = new uint8_t[nx * ny * 3 * sizeof(uint8_t)];
     for (int j = ny - 1; j >= 0; j--) {
         for (int i = 0; i < nx; i++) {
-            imageHost[(ny - j - 1) * nx * 3 + i * 3] = 0;
-            imageHost[(ny - j - 1) * nx * 3 + i * 3 + 1] = 0;
-            imageHost[(ny - j - 1) * nx * 3 + i * 3 + 2] = 0; 
+            float temp_r = 0.0;
+            float temp_g = 0.0;
+            float temp_b = 0.0;
             for (int k = 0; k < ns; k++) {
                 size_t pixel_index = j * nx * ns + i * ns + k;
-                imageHost[(ny - j - 1) * nx * 3 + i * 3] += 255.99 * image[pixel_index].r() / ns;
-                imageHost[(ny - j - 1) * nx * 3 + i * 3 + 1] += 255.99 * image[pixel_index].g() / ns;
-                imageHost[(ny - j - 1) * nx * 3 + i * 3 + 2] += 255.99 * image[pixel_index].b() / ns;
+                temp_r += image[pixel_index].r();
+                temp_g += image[pixel_index].g();
+                temp_b += image[pixel_index].b();
             }
+            imageHost[(ny - j - 1) * nx * 3 + i * 3] = 255.99 * sqrt(temp_r/float(ns));
+            imageHost[(ny - j - 1) * nx * 3 + i * 3 + 1] = 255.99 * sqrt(temp_g/float(ns));
+            imageHost[(ny - j - 1) * nx * 3 + i * 3 + 2] = 255.99 * sqrt(temp_b/float(ns));
         }
     }
     stbi_write_png(argv[4], nx, ny, 3, imageHost, nx * 3);
