@@ -1,4 +1,4 @@
-CC=nvcc
+CC=/usr/local/cuda-11.6/bin/nvcc
 CFLAGS=-I./src
 MAIN=./src/main.cu
 EXECUTABLE=raytracing
