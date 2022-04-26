@@ -165,6 +165,55 @@ __global__ void render(Vec3* fb, int max_x, int max_y, int ns, Camera **cam, Ent
     fb[pixel_index] = col;
 }
 
+__global__ void render_init_with_sample(int maxx, int maxy, int maxs, curandState *rand_state) {
+    int i = threadIdx.x + blockIdx.x * blockDim.x;
+    int j = threadIdx.y + blockIdx.y * blockDim.y;
+    int k = threadIdx.z + blockIdx.z * blockDim.z;
+    if((i >= maxx) || (j >= maxy) || (k >= maxs)) return;
+    int pixel_index = j*maxx*maxs + i*maxs + k;
+    curand_init(1984, pixel_index, 0, &rand_state[pixel_index]);
+}
+
+__global__ void render_with_sample(Vec3* fb, int max_x, int max_y, int max_s, Camera **cam, Entity **world, curandState *randState) {
+    int i = threadIdx.x + blockIdx.x * blockDim.x;
+    int j = threadIdx.y + blockIdx.y * blockDim.y;
+    int k = threadIdx.z + blockIdx.z * blockDim.z;
+    if((i >= max_x) || (j >= max_y) || (k >= max_s)) return;
+    int pixel_index = j*max_x*max_s + i*max_s + k;
+    curandState local_rand_state = randState[pixel_index];
+    Vec3 col(0,0,0);
+    Vec3 background(0, 0, 0);
+    float u = float(i + curand_uniform(&local_rand_state)) / float(max_x);
+    float v = float(j + curand_uniform(&local_rand_state)) / float(max_y);
+    Ray r = (*cam)->get_ray(u, v, &local_rand_state);
+    col = color(r, background, world, &local_rand_state);
+    
+    randState[pixel_index] = local_rand_state;
+    col[0] = sqrt(col[0]);
+    col[1] = sqrt(col[1]);
+    col[2] = sqrt(col[2]);
+    fb[pixel_index] = col;
+}
+
+__global__ void sum_sample(Vec3* sub_image, Vec3* image, int max_x, int max_y, int max_s) {
+    int i = threadIdx.x + blockIdx.x * blockDim.x;
+    int j = threadIdx.y + blockIdx.y * blockDim.y;
+    int k = threadIdx.z + blockIdx.z * blockDim.z;
+    if((i >= max_x) || (j >= max_y) || (k >= max_s)) return;
+    int device_pixel_index = j*max_x*max_s + i*max_s + k;
+    int sub_pixel_index = j*max_x + i;
+    sub_image[sub_pixel_index] += image[device_pixel_index];
+}
+
+
+__global__ void mean_sample(Vec3* sub_image, int max_x, int max_y, int max_s) {
+    int i = threadIdx.x + blockIdx.x * blockDim.x;
+    int j = threadIdx.y + blockIdx.y * blockDim.y;
+    if((i >= max_x) || (j >= max_y)) return;
+    int sub_pixel_index = j*max_x + i;
+    sub_image[sub_pixel_index] /= max_s;
+}
+
 int main(int argc, char* argv[]) {
     if (argc < 5) {
         std::cerr << "Usage: " << argv[0] << " [WIDTH] [HEIGHT] [BOUNCES] [OUTPUT FILENAME]" << std::endl;
@@ -174,9 +223,10 @@ int main(int argc, char* argv[]) {
     int ns = std::stoi(std::string(argv[3]));
     int tx = 16;
     int ty = 16;
+    int tz = 4;
     
     // Values
-    int num_pixels = nx * ny;
+    int num_pixels = nx * ny * ns;
 
     int tex_x, tex_y, tex_n;
     unsigned char *tex_data_host = stbi_load("assets/earthmap.jpg", &tex_x, &tex_y, &tex_n, 0);
@@ -191,7 +241,9 @@ int main(int argc, char* argv[]) {
 
     // Allocating CUDA memory
     Vec3* image;
-    checkCudaErrors(cudaMallocManaged((void**)&image, nx * ny * sizeof(Vec3)));
+    checkCudaErrors(cudaMallocManaged((void**)&image, nx * ny * ns * sizeof(Vec3)));
+    // Vec3* sub_image;
+    // checkCudaErrors(cudaMallocManaged((void**)&sub_image, nx * ny * sizeof(Vec3)));
 
     // Allocate random state
     curandState *d_rand_state;
@@ -216,22 +268,38 @@ int main(int argc, char* argv[]) {
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
-    dim3 blocks(nx/tx+1,ny/ty+1);
-    dim3 threads(tx,ty);
-    render_init<<<blocks, threads>>>(nx, ny, d_rand_state);
+    dim3 blocks(nx/tx+1,ny/ty+1, ns/tz+1);
+    dim3 threads(tx,ty,tz);
+    render_init_with_sample<<<blocks, threads>>>(nx, ny, ns, d_rand_state);
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
-    render<<<blocks, threads>>>(image, nx, ny,  ns, camera, eworld, d_rand_state);
+    render_with_sample<<<blocks, threads>>>(image, nx, ny, ns, camera, eworld, d_rand_state);
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
+    /*
+    sum_sample<<<blocks, threads>>>(sub_image, image, nx, ny, ns);
+    checkCudaErrors(cudaGetLastError());
+    checkCudaErrors(cudaDeviceSynchronize());
+
+    dim3 blocks_2(nx/tx+1,ny/ty+1);
+    dim3 threads_2(tx,ty);
+    mean_sample<<<blocks_2, threads_2>>>(sub_image, nx, ny, ns);
+    checkCudaErrors(cudaGetLastError());
+    checkCudaErrors(cudaDeviceSynchronize());
+    */
 
     uint8_t* imageHost = new uint8_t[nx * ny * 3 * sizeof(uint8_t)];
     for (int j = ny - 1; j >= 0; j--) {
         for (int i = 0; i < nx; i++) {
-            size_t pixel_index = j * nx + i;
-            imageHost[(ny - j - 1) * nx * 3 + i * 3] = 255.99 * image[pixel_index].r();
-            imageHost[(ny - j - 1) * nx * 3 + i * 3 + 1] = 255.99 * image[pixel_index].g();
-            imageHost[(ny - j - 1) * nx * 3 + i * 3 + 2] = 255.99 * image[pixel_index].b();
+            imageHost[(ny - j - 1) * nx * 3 + i * 3] = 0;
+            imageHost[(ny - j - 1) * nx * 3 + i * 3 + 1] = 0;
+            imageHost[(ny - j - 1) * nx * 3 + i * 3 + 2] = 0; 
+            for (int k = 0; k < ns; k++) {
+                size_t pixel_index = j * nx * ns + i * ns + k;
+                imageHost[(ny - j - 1) * nx * 3 + i * 3] += 255.99 * image[pixel_index].r() / ns;
+                imageHost[(ny - j - 1) * nx * 3 + i * 3 + 1] += 255.99 * image[pixel_index].g() / ns;
+                imageHost[(ny - j - 1) * nx * 3 + i * 3 + 2] += 255.99 * image[pixel_index].b() / ns;
+            }
         }
     }
     stbi_write_png(argv[4], nx, ny, 3, imageHost, nx * 3);

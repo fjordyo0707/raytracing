@@ -7,7 +7,10 @@ $(EXECUTABLE):
 	$(CC) $(MAIN) -o $@ $^ $(CFLAGS)
 
 run: $(EXECUTABLE)
-	./$(EXECUTABLE) 1280 720 400 out.png
+	./$(EXECUTABLE) 1280 720 64 out.png
+
+clean:
+	rm ./${EXECUTABLE}
 
 show: run
 	feh out.png
