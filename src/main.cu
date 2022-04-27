@@ -210,6 +210,12 @@ __global__ void sum_sample(Vec3* sub_image, Vec3* image, int max_x, int max_y, i
     atomicAdd(&(sub_image[sub_pixel_index][1]), image[device_pixel_index].g());
     atomicAdd(&(sub_image[sub_pixel_index][2]), image[device_pixel_index].b());
     __syncthreads();
+    if(k == 0) {
+        float temp_r = 255.99 * sqrt(sub_image[sub_pixel_index][0] / float(max_s));
+        float temp_g = 255.99 * sqrt(sub_image[sub_pixel_index][1] / float(max_s));
+        float temp_b = 255.99 * sqrt(sub_image[sub_pixel_index][2] / float(max_s));
+        sub_image[sub_pixel_index] = Vec3(temp_r, temp_g, temp_b);
+    }
 }
 
 
@@ -303,9 +309,16 @@ int main(int argc, char* argv[]) {
     for (int j = ny - 1; j >= 0; j--) {
         for (int i = 0; i < nx; i++) {
             size_t pixel_index = j * nx + i;
-            imageHost[(ny - j - 1) * nx * 3 + i * 3] = 255.99 * sqrt(sub_image[pixel_index].r() / float(ns));
-            imageHost[(ny - j - 1) * nx * 3 + i * 3 + 1] = 255.99 * sqrt(sub_image[pixel_index].g() / float(ns));
-            imageHost[(ny - j - 1) * nx * 3 + i * 3 + 2] = 255.99 * sqrt(sub_image[pixel_index].b() / float(ns));
+            /*
+            if(sub_image[pixel_index].r() > 0.0) {
+                std::cout<<sub_image[pixel_index].r()<<std::endl;
+                std::cout<<sub_image[pixel_index].g()<<std::endl;
+                std::cout<<sub_image[pixel_index].b()<<std::endl;
+            }
+            */
+            imageHost[(ny - j - 1) * nx * 3 + i * 3] = sub_image[pixel_index][0];
+            imageHost[(ny - j - 1) * nx * 3 + i * 3 + 1] = sub_image[pixel_index][1];
+            imageHost[(ny - j - 1) * nx * 3 + i * 3 + 2] = sub_image[pixel_index][2];
         }
     }
     stbi_write_png(argv[4], nx, ny, 3, imageHost, nx * 3);
