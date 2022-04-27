@@ -199,7 +199,17 @@ __global__ void sum_sample(Vec3* sub_image, Vec3* image, int max_x, int max_y, i
     if((i >= max_x) || (j >= max_y) || (k >= max_s)) return;
     int device_pixel_index = j*max_x*max_s + i*max_s + k;
     int sub_pixel_index = j*max_x + i;
-    sub_image[sub_pixel_index] += image[device_pixel_index];
+    if(k == 0) {
+        sub_image[sub_pixel_index][0] = 0.0;
+        sub_image[sub_pixel_index][1] = 0.0;
+        sub_image[sub_pixel_index][2] = 0.0;
+    }
+    __syncthreads();
+
+    atomicAdd(&(sub_image[sub_pixel_index][0]), image[device_pixel_index].r());
+    atomicAdd(&(sub_image[sub_pixel_index][1]), image[device_pixel_index].g());
+    atomicAdd(&(sub_image[sub_pixel_index][2]), image[device_pixel_index].b());
+    __syncthreads();
 }
 
 
@@ -208,7 +218,11 @@ __global__ void mean_sample(Vec3* sub_image, int max_x, int max_y, int max_s) {
     int j = threadIdx.y + blockIdx.y * blockDim.y;
     if((i >= max_x) || (j >= max_y)) return;
     int sub_pixel_index = j*max_x + i;
-    sub_image[sub_pixel_index] /= max_s;
+    sub_image[sub_pixel_index] /= float(max_s);
+
+    sub_image[sub_pixel_index][0] = sqrt(sub_image[sub_pixel_index][0]);
+    sub_image[sub_pixel_index][1] = sqrt(sub_image[sub_pixel_index][1]);
+    sub_image[sub_pixel_index][2] = sqrt(sub_image[sub_pixel_index][2]);
 }
 
 int main(int argc, char* argv[]) {
@@ -239,8 +253,6 @@ int main(int argc, char* argv[]) {
     // Allocating CUDA memory
     Vec3* image;
     checkCudaErrors(cudaMallocManaged((void**)&image, nx * ny * ns * sizeof(Vec3)));
-    // Vec3* sub_image;
-    // checkCudaErrors(cudaMallocManaged((void**)&sub_image, nx * ny * sizeof(Vec3)));
 
     // Allocate random state
     curandState *d_rand_state;
@@ -272,12 +284,14 @@ int main(int argc, char* argv[]) {
     checkCudaErrors(cudaDeviceSynchronize());
     render_with_sample<<<blocks, threads>>>(image, nx, ny, ns, camera, eworld, d_rand_state);
     checkCudaErrors(cudaGetLastError());
-    checkCudaErrors(cudaDeviceSynchronize());
-    /*
+
+    Vec3* sub_image;
+    checkCudaErrors(cudaMallocManaged((void**)&sub_image, nx * ny * sizeof(Vec3)));
+    
     sum_sample<<<blocks, threads>>>(sub_image, image, nx, ny, ns);
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
-
+    /*
     dim3 blocks_2(nx/tx+1,ny/ty+1);
     dim3 threads_2(tx,ty);
     mean_sample<<<blocks_2, threads_2>>>(sub_image, nx, ny, ns);
@@ -288,18 +302,10 @@ int main(int argc, char* argv[]) {
     uint8_t* imageHost = new uint8_t[nx * ny * 3 * sizeof(uint8_t)];
     for (int j = ny - 1; j >= 0; j--) {
         for (int i = 0; i < nx; i++) {
-            float temp_r = 0.0;
-            float temp_g = 0.0;
-            float temp_b = 0.0;
-            for (int k = 0; k < ns; k++) {
-                size_t pixel_index = j * nx * ns + i * ns + k;
-                temp_r += image[pixel_index].r();
-                temp_g += image[pixel_index].g();
-                temp_b += image[pixel_index].b();
-            }
-            imageHost[(ny - j - 1) * nx * 3 + i * 3] = 255.99 * sqrt(temp_r/float(ns));
-            imageHost[(ny - j - 1) * nx * 3 + i * 3 + 1] = 255.99 * sqrt(temp_g/float(ns));
-            imageHost[(ny - j - 1) * nx * 3 + i * 3 + 2] = 255.99 * sqrt(temp_b/float(ns));
+            size_t pixel_index = j * nx + i;
+            imageHost[(ny - j - 1) * nx * 3 + i * 3] = 255.99 * sqrt(sub_image[pixel_index].r() / float(ns));
+            imageHost[(ny - j - 1) * nx * 3 + i * 3 + 1] = 255.99 * sqrt(sub_image[pixel_index].g() / float(ns));
+            imageHost[(ny - j - 1) * nx * 3 + i * 3 + 2] = 255.99 * sqrt(sub_image[pixel_index].b() / float(ns));
         }
     }
     stbi_write_png(argv[4], nx, ny, 3, imageHost, nx * 3);
