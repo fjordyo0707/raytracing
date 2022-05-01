@@ -42,19 +42,15 @@ __device__ Vec3 color(const Ray& r, const Vec3& background, Entity **world, cura
         HitRecord rec;
         if ((*world)->hit(cur_ray, 0.001f, FLT_MAX, rec)) {
             Ray scattered;
-            Vec3 attenuation;
+            Vec3 attenuation = Vec3(0.0, 0.0, 0.0);
             Vec3 emitted = rec.mat_ptr->emitted(rec.u, rec.v, rec.p);
+            Vec3 tmp = cur_emitted + emitted * cur_attenuation; 
             if(rec.mat_ptr->scatter(cur_ray, rec, attenuation, scattered, local_rand_state)) {
-                cur_attenuation *= attenuation;
-                cur_emitted += emitted * cur_attenuation;
                 cur_ray = scattered;
+                tmp = cur_emitted + emitted * cur_attenuation * attenuation;
             }
-            else {
-                return cur_emitted + emitted * cur_attenuation;
-            }
-        }
-        else {
-            return cur_emitted;
+            cur_attenuation = cur_attenuation * attenuation;
+            cur_emitted = tmp;
         }
     }
     return cur_emitted; // exceeded recursion
