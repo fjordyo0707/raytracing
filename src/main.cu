@@ -174,13 +174,14 @@ __global__ void render_init_with_sample(int maxx, int maxy, int maxs, curandStat
     curand_init(1984, pixel_index, 0, &rand_state[pixel_index]);
 }
 
-__global__ void render_with_sample(Vec3* fb, int max_x, int max_y, int max_s, Camera **cam, Entity **world, curandState *randState) {
+__global__ void render_with_sample(Vec3* fb, int max_x, int max_y, int max_s, Camera **cam, Entity **world) {
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     int j = threadIdx.y + blockIdx.y * blockDim.y;
     int k = threadIdx.z + blockIdx.z * blockDim.z;
     if((i >= max_x) || (j >= max_y) || (k >= max_s)) return;
     int pixel_index = j*max_x*max_s + i*max_s + k;
-    curandState local_rand_state = randState[pixel_index];
+    curandState local_rand_state;
+    curand_init(1984, pixel_index, 0, &local_rand_state);
     Vec3 col(0,0,0);
     Vec3 background(0, 0, 0);
     float u = float(i + curand_uniform(&local_rand_state)) / float(max_x);
@@ -188,7 +189,7 @@ __global__ void render_with_sample(Vec3* fb, int max_x, int max_y, int max_s, Ca
     Ray r = (*cam)->get_ray(u, v, &local_rand_state);
     col = color(r, background, world, &local_rand_state);
     
-    randState[pixel_index] = local_rand_state;
+    //randState[pixel_index] = local_rand_state;
     fb[pixel_index] = col;
 }
 
@@ -255,8 +256,8 @@ int main(int argc, char* argv[]) {
     checkCudaErrors(cudaMallocManaged((void**)&image, nx * ny * ns * sizeof(Vec3)));
 
     // Allocate random state
-    curandState *d_rand_state;
-    checkCudaErrors(cudaMalloc((void **)&d_rand_state, num_pixels * sizeof(curandState)));
+    //curandState *d_rand_state;
+    //checkCudaErrors(cudaMalloc((void **)&d_rand_state, num_pixels * sizeof(curandState)));
     curandState *d_rand_state2;
     checkCudaErrors(cudaMalloc((void **)&d_rand_state2, 1 * sizeof(curandState)));
 
@@ -279,10 +280,10 @@ int main(int argc, char* argv[]) {
 
     dim3 blocks(nx/tx+1,ny/ty+1, ns/tz+1);
     dim3 threads(tx,ty,tz);
-    render_init_with_sample<<<blocks, threads>>>(nx, ny, ns, d_rand_state);
+    //render_init_with_sample<<<blocks, threads>>>(nx, ny, ns, d_rand_state);
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
-    render_with_sample<<<blocks, threads>>>(image, nx, ny, ns, camera, eworld, d_rand_state);
+    render_with_sample<<<blocks, threads>>>(image, nx, ny, ns, camera, eworld);
     checkCudaErrors(cudaGetLastError());
 
     Vec3* sub_image;
@@ -316,6 +317,6 @@ int main(int argc, char* argv[]) {
     checkCudaErrors(cudaFree(camera));
     checkCudaErrors(cudaFree(eworld));
     checkCudaErrors(cudaFree(elist));
-    checkCudaErrors(cudaFree(d_rand_state));
+    //checkCudaErrors(cudaFree(d_rand_state));
     checkCudaErrors(cudaFree(image));
 }
